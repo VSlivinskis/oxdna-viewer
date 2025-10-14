@@ -243,6 +243,7 @@ class TrajectoryReader {
         // Parse time and update time displays
         const time = parseInt(lines[0].split(/\s+/)[2]);
         this.time = time;
+        window.currentSimTime = time;
         confNum += 1;
         console.log(confNum, "t =", time);
         let timedisp = document.getElementById("trajTimestep");

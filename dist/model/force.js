@@ -385,24 +385,17 @@ class RepulsiveSphere extends Force {
             Number.isFinite(r?.frame)      ? r.frame      :
             0);
         } catch (_) {}
-      
+
         if (typeof window !== 'undefined' && Number.isFinite(window.currentFrameIndex)) {
           step = window.currentFrameIndex;
         }
-      
-        // 2) Convert viewer frame -> simulation STEPS, then compute current radius
-        // If your trajectory saves every N steps, multiply frames by that N.
-        // You said N = 1e6; allow an override via window if you have one.
-        const stepsPerFrame =
-            (typeof window !== 'undefined' && Number.isFinite(window.oxdnaStepsPerFrame))
-            ? window.oxdnaStepsPerFrame
-            : 1e6; // default: saved every 1e6 steps
-    
-        const simSteps = step * stepsPerFrame * 1e-4;
-        
-        // IMPORTANT: do not mutate r0. Set currentRadius from r0 + rate * (sim steps).
-        this.currentRadius = this.r0 + this.rate * simSteps;
-      }      
+
+        const stepsPerFrame = (typeof window !== "undefined" && window.currentSimTime !== undefined)
+        ? window.currentSimTime
+        : 0;
+
+        this.currentRadius = this.r0 + this.rate * stepsPerFrame;
+      }
 
     toJSON() {
       const particleData = Array.isArray(this.particles) ? this.particles.map(p => p.id) : this.particles;
@@ -480,7 +473,7 @@ class ForceHandler {
           console.error(exceptionVar);
         }
       }
-      
+
     removeByElement(elems, removePair = false) {
         // Get traps which contain the element
         const pairwiseForces = this.getTraps();
@@ -643,21 +636,21 @@ class ForceHandler {
           const geom = new THREE.SphereGeometry(Math.max(f.currentRadius, 0.0001), seg, seg);
           const color = this.sphereColors[spheres.indexOf(f) % this.sphereColors.length];
           const mat = new THREE.MeshPhongMaterial({ transparent: true, opacity: 0.25, color, side: THREE.DoubleSide });
-      
+
           const mesh = new THREE.Mesh(geom, mat);
           mesh.position.copy(f.center);
-      
+
           // optional edge outline to improve visibility
           const edges = new THREE.EdgesGeometry(geom);
           const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color }));
           line.position.copy(f.center);
-      
+
           scene.add(mesh);
           scene.add(line);
-      
+
           f.mesh = mesh;
           f.outline = line;
-      
+
           // Remember the radius the geometry was BUILT with.
           // We'll scale to currentRadius / _baseRadius on every redraw.
           f._baseRadius = f.currentRadius;
@@ -673,24 +666,23 @@ class ForceHandler {
       redrawSpheres() {
         const spheres = this.getSpheres();
         if (spheres.length === 0) return;
-      
+
         spheres.forEach(f => {
           f.update();
           if (!f.mesh) return;
-      
+
           // Absolute scale so visual radius = currentRadius
           const base = Math.max(f._baseRadius || 1, 1e-6);
           const s = Math.max(f.currentRadius, 1e-6) / base;
-          s = s * 1e-4
           f.mesh.scale.set(s, s, s);
           if (f.outline) f.outline.scale.set(s, s, s);
 
         });
-      
-        render();
-      }      
 
-      
+        render();
+      }
+
+
 }
 function makeTrapsFromSelection() {
     let stiffness = parseFloat(document.getElementById("txtForceValue").value);
