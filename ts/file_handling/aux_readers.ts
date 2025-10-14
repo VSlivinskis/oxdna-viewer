@@ -169,6 +169,13 @@ function readForce(forceFile) {
                     mutTrap.update();
                     forceObjs.push(mutTrap);
                     break;
+                case "sphere": {
+                    const s = new RepulsiveSphere();
+                    s.setFromParsedJson(f); // supports: particle, stiff, r0, rate, center
+                    s.update();
+                    forceObjs.push(s);
+                    break;
+                    }
                 case "skew_trap":
                     let skewTrap = new SkewTrap();
                     skewTrap.setFromParsedJson(f);
@@ -189,6 +196,7 @@ function readForce(forceFile) {
                     break;
                 default:
                     notify(`External force -${f["type"]}- type not supported yet, feel free to implement in aux_readers.ts and force.ts`);
+                    // notify('Test');
                     break;
             }
         });
