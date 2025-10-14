@@ -360,10 +360,110 @@ class AttractionPlane extends PlaneForce {
     position: number;
 }
 
+class RepulsiveSphere extends Force {
+    type = 'sphere';
+  
+    // oxDNA fields
+    particles: BasicElement[] | number;   // -1 | list of elements (like PlaneForce)
+    stiff: number;
+    r0: number;
+    rate: number;
+    center: THREE.Vector3 = new THREE.Vector3(0,0,0);
+  
+    // viewer state
+    currentRadius: number;
+    mesh: THREE.Mesh;           // the translucent sphere
+    outline?: THREE.LineSegments; // optional edges outline for clarity
+  
+    set(particles: BasicElement[] | number, stiff=10, r0=6, rate=0, center=new THREE.Vector3(0,0,0)) {
+      this.particles = particles;
+      this.stiff = stiff;
+      this.r0 = r0;
+      this.rate = rate;
+      this.center = center;
+      this.currentRadius = r0;
+      this.update();
+    }
+  
+    setFromParsedJson(parsedjson) {
+      for (const param in parsedjson) {
+        if (param === 'particle') {
+          const v = parsedjson[param];
+          if (Array.isArray(v)) {
+            this.particles = v.map(id => elements.get(id)).filter(p => p !== undefined);
+          } else if (v === -1 || v === 'all') {
+            this.particles = -1;
+          } else if (typeof v === 'string' && v.includes('-')) {
+            // optional: expand simple ranges "5-7"
+            const [a,b] = v.split('-').map(Number);
+            const ids = [];
+            for (let k=a; k<=b; k++) ids.push(k);
+            this.particles = ids.map(id => elements.get(id)).filter(p => p !== undefined);
+          } else if (typeof v === 'number') {
+            const el = elements.get(v);
+            if (!el) { const err = `Particle ${v} in parsed force file does not exist.`; notify(err, "alert"); throw(err); }
+            this.particles = [el];
+          }
+        } else if (param === 'center') {
+          const c = parsedjson[param];
+          this.center = new THREE.Vector3(c[0], c[1], c[2]);
+        } else {
+          (this as any)[param] = parsedjson[param];
+        }
+      }
+      this.currentRadius = this.r0;
+      this.update();
+    }
+  
+    // compute current radius from frame index (assumes global current frame/step is accessible)
+    update() {
+      // If your app exposes a current frame index or MD step, use it here.
+      // Many viewers increment on redraw; fall back to r0 if unknown.
+      const step = (window as any)?.currentFrameIndex ?? 0;
+      this.currentRadius = this.r0 + this.rate * step;
+    }
+  
+    toJSON() {
+      const particleData = Array.isArray(this.particles) ? this.particles.map(p => p.id) : this.particles;
+      return {
+        type: this.type,
+        particle: particleData,
+        stiff: this.stiff,
+        r0: this.r0,
+        rate: this.rate,
+        center: [this.center.x, this.center.y, this.center.z],
+      };
+    }
+  
+    toString(idMap?: Map<BasicElement, number>): string {
+      const particleRepresentation = Array.isArray(this.particles)
+        ? this.particles.map(p => idMap ? idMap.get(p) : p.id).join(", ")
+        : this.particles.toString();
+      return (
+  `{
+      type = ${this.type}
+      particle = ${particleRepresentation}
+      center = ${this.center.x},${this.center.y},${this.center.z}
+      stiff = ${this.stiff}
+      rate = ${this.rate}
+      r0 = ${this.r0}
+  }`
+      );
+    }
+  
+    description(): string {
+      const target = Array.isArray(this.particles) ? `${this.particles.length} particles` : (this.particles === -1 ? "all particles" : `${this.particles}`);
+      return `Repulsive sphere @ ${this.center.toArray().map(n=>n.toFixed(2)).join(',')} on ${target}`;
+    }
+  }
+  
+
 class ForceHandler{
     types: string[] = [];
     knownTrapForces: string[] = ['mutual_trap', 'skew_trap']; //these are the forces I know how to draw via lines
     knownPlaneForces: string[] = ["repulsion_plane", "attraction_plane"]; //these are the forces I know how to draw via planes
+    knownSphereForces: string[] = ['sphere']; // NEW: sphere forces drawn as meshes
+
     forceColors: THREE.Color[] = [ //add more if you implement more forces
         new THREE.Color(0x0000FF),
         new THREE.Color(0xFF0000),
@@ -373,10 +473,15 @@ class ForceHandler{
         new THREE.Color(0xFF00FF),
     ];
 
+    sphereColors: THREE.Color[] = [
+        new THREE.Color(0x00BFFF), // deep sky blue
+        ];
+
     forceLines: THREE.LineSegments[] = [];
     eqDistLines: THREE.LineSegments;
 
     forcePlanes: THREE.Mesh[] = [];
+    sphereMeshes: THREE.Mesh[] = []; // NEW
 
     forces: Force[] = []
     sceneObjects: THREE.Object3D[] = [];
@@ -390,6 +495,7 @@ class ForceHandler{
             if (this.sceneObjects.length > 0) { this.clearForcesFromScene() }
             this.drawTraps();
             this.drawPlanes();
+            this.drawSpheres(); // NEW
         }
         catch (exceptionVar) {
             forces.forEach(_ => this.forces.pop())
@@ -432,6 +538,10 @@ class ForceHandler{
 
     getPlanes() {
         return <PlaneForce[]>this.forces.filter(f => this.knownPlaneForces.includes(f.type));
+    }
+
+    getSpheres() {
+        return <RepulsiveSphere[]>this.forces.filter(f => this.knownSphereForces.includes(f.type));
     }
 
     clearForcesFromScene() {
@@ -525,6 +635,37 @@ class ForceHandler{
         });
     }
 
+    drawSpheres() {
+        const spheres = this.getSpheres();
+        spheres.forEach(f => {
+          // geometry
+          const seg = 32; // reasonably smooth
+          const geom = new THREE.SphereGeometry(Math.max(f.currentRadius, 0.0001), seg, seg);
+      
+          // material (translucent)
+          const color = this.sphereColors[spheres.indexOf(f) % this.sphereColors.length];
+          const mat = new THREE.MeshPhongMaterial({ transparent: true, opacity: 0.25, color, side: THREE.DoubleSide });
+      
+          const mesh = new THREE.Mesh(geom, mat);
+          mesh.position.copy(f.center);
+      
+          // optional: edge outline so it reads well
+          const edges = new THREE.EdgesGeometry(geom, 1);
+          const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color }));
+      
+          line.position.copy(f.center);
+      
+          scene.add(mesh);
+          scene.add(line);
+      
+          f.mesh = mesh;
+          f.outline = line;
+      
+          this.sceneObjects.push(mesh, line);
+          this.sphereMeshes.push(mesh);
+        });
+      }
+      
     redrawTraps() {
         if (this.forces.length == 0) { return }
 
@@ -557,6 +698,29 @@ class ForceHandler{
 
         render()
     }
+    redrawSpheres() {
+        const spheres = this.getSpheres();
+        if (spheres.length === 0) return;
+      
+        spheres.forEach(f => {
+          f.update(); // recompute currentRadius
+          if (!f.mesh) return;
+          // Rebuild geometry or rescale: rebuild is safer for normals
+          const seg = 32;
+          const newGeom = new THREE.SphereGeometry(Math.max(f.currentRadius, 0.0001), seg, seg);
+          f.mesh.geometry.dispose();
+          f.mesh.geometry = newGeom;
+      
+          if (f.outline) {
+            const edges = new THREE.EdgesGeometry(newGeom, 1);
+            (f.outline.geometry as THREE.EdgesGeometry).dispose();
+            f.outline.geometry = edges;
+          }
+        });
+      
+        render();
+      }
+      
 }
 
 function makeTrapsFromSelection() {
@@ -583,6 +747,31 @@ function makeTrapsFromSelection() {
     }
 
     forceHandler.set(forces);
+}
+
+
+// =========================
+// NEW: makeSphereFromSelection (optional helper)
+// =========================
+function makeSphereFromSelection() {
+    const stiffness = parseFloat((document.getElementById("txtForceValue") as HTMLInputElement).value);
+    const r0 = parseFloat((document.getElementById('r0') as HTMLInputElement).value);
+    const rate = parseFloat((document.getElementById('rate') as HTMLInputElement)?.value ?? '0');
+    const selection = Array.from(selectedBases) as BasicElement[];
+
+    // center from selection centroid; fallback (0,0,0) if empty
+    let center = new THREE.Vector3(0, 0, 0);
+    if (selection.length > 0) {
+    const acc = selection.reduce(
+        (v, b) => v.add(b.getInstanceParameter3("bbOffsets")),
+        new THREE.Vector3()
+    );
+    center = acc.multiplyScalar(1 / selection.length);
+    }
+
+    const sphere = new RepulsiveSphere();
+    sphere.set(selection.length > 0 ? selection : -1, stiffness, r0, rate, center);
+    forceHandler.set([sphere]);
 }
 
 function makeTrapsFromPairs() {
