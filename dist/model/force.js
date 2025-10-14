@@ -398,10 +398,10 @@ class RepulsiveSphere extends Force {
             ? window.oxdnaStepsPerFrame
             : 1e6; // default: saved every 1e6 steps
     
-        const simSteps = step * stepsPerFrame;
-    
+        const simSteps = step * stepsPerFrame * 1e-4;
+        
         // IMPORTANT: do not mutate r0. Set currentRadius from r0 + rate * (sim steps).
-        this.currentRadius = this.r0 + this.rate * 1e6;
+        this.currentRadius = this.r0 + this.rate * simSteps;
       }      
 
     toJSON() {
@@ -681,10 +681,9 @@ class ForceHandler {
           // Absolute scale so visual radius = currentRadius
           const base = Math.max(f._baseRadius || 1, 1e-6);
           const s = Math.max(f.currentRadius, 1e-6) / base;
+          s = s * 1e-4
           f.mesh.scale.set(s, s, s);
           if (f.outline) f.outline.scale.set(s, s, s);
-          
-          console.log(f.currentRadius)
 
         });
       
