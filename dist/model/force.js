@@ -395,6 +395,7 @@ class RepulsiveSphere extends Force {
         : 0;
 
         this.currentRadius = this.r0 + this.rate * stepsPerFrame;
+        console.log("R0:", this.r0, "; Current Radius", this.currentRadius)
       }
 
     toJSON() {
