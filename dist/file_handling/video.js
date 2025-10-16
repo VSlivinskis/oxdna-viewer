@@ -1,3 +1,5 @@
+<script src="https://cdn.jsdelivr.net/npm/ccapture.js@1.1.0/build/CCapture.all.min.js"></script>
+
 function createVideo() {
     // Get canvas
     const canvas = document.getElementById("threeCanvas");
