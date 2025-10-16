@@ -191,6 +191,128 @@ class SkewTrap extends PairwiseForce {
         ];
     }
 }
+class COMForce extends Force {
+    type = 'com';
+    // arrays of BasicElement (nucleotides) for each group
+    com_list = [];
+    ref_list = [];
+    stiff = 0.09;
+    r0 = 1.2;
+    rate = 0.0;
+  
+    // for drawing like other traps
+    eqDists = [];
+    force = [];
+  
+    set(comList, refList, stiff = 0.09, r0 = 1.2, rate = 0.0) {
+      this.com_list = comList;
+      this.ref_list = refList;
+      this.stiff = stiff;
+      this.r0 = r0;
+      this.rate = rate;
+      this.update();
+    }
+  
+    equals(compareForce) {
+      if (!(compareForce instanceof COMForce)) return false;
+      // shallow compare by element identity + params
+      const sameA = this.com_list.length === compareForce.com_list.length &&
+                    this.com_list.every((e, i) => e === compareForce.com_list[i]);
+      const sameB = this.ref_list.length === compareForce.ref_list.length &&
+                    this.ref_list.every((e, i) => e === compareForce.ref_list[i]);
+      return sameA && sameB &&
+             this.stiff === compareForce.stiff &&
+             this.r0 === compareForce.r0 &&
+             this.rate === compareForce.rate;
+    }
+  
+    setFromParsedJson(parsedjson) {
+      for (const param in parsedjson) {
+        if (param === 'com_list' || param === 'ref_list') {
+          const arr = parsedjson[param];
+          if (!Array.isArray(arr)) {
+            const err = `Invalid ${param} (expected array of element ids)`;
+            notify(err, "alert"); throw err;
+          }
+          this[param] = arr.map(id => elements.get(id)).filter(p => p !== undefined);
+          if (this[param].length === 0) {
+            const err = `${param} is empty or contains invalid ids`;
+            notify(err, "alert"); throw err;
+          }
+        } else {
+          this[param] = parsedjson[param];
+        }
+      }
+      this.update();
+    }
+  
+    toJSON() {
+      return {
+        type: this.type,
+        com_list: this.com_list.map(p => p.id),
+        ref_list: this.ref_list.map(p => p.id),
+        stiff: this.stiff,
+        r0: this.r0,
+        rate: this.rate
+      };
+    }
+  
+    toString(idMap) {
+      const ids = a => a.map(p => idMap ? idMap.get(p) : p.id).join(' ');
+      return (`{
+      type = ${this.type}
+      com_list = ${ids(this.com_list)}
+      ref_list = ${ids(this.ref_list)}
+      stiff = ${this.stiff}
+      r0 = ${this.r0}
+      rate = ${this.rate}
+  }`);
+    }
+  
+    description() {
+      return `COM force between groups (${this.com_list.length}) → (${this.ref_list.length})`;
+    }
+  
+    update() {
+      // compute group COMs from current positions (viewer uses bbOffsets the same
+      // way other forces do for positions) :contentReference[oaicite:8]{index=8}
+      const com = this._avg(this.com_list);
+      const ref = this._avg(this.ref_list);
+  
+      // visualize the equilibrium segment from COM toward ref with length r0
+      let dir = ref.clone().sub(com);
+      const dist = dir.length();
+      if (dist > 0) dir.normalize();
+  
+      this.eqDists = [
+        com,
+        com.clone().add(dir.clone().multiplyScalar(this.r0))
+      ];
+  
+      // match the backend magnitude: (|d| - (r0 + rate*step)) * stiff / |com_list|
+      // We don’t have discrete “step” here; the viewer’s timebase is frame-like.
+      // You already expose a per-redraw time via window.currentSimTime (used by the sphere); reuse it. :contentReference[oaicite:9]{index=9}
+      const stepsPerFrame = (typeof window !== "undefined" && window.currentSimTime !== undefined)
+        ? window.currentSimTime : 0;
+  
+      const target = this.r0 + this.rate * stepsPerFrame;
+      const mag = (dist - target) * this.stiff / Math.max(this.com_list.length, 1);
+  
+      this.force = [
+        com,
+        com.clone().add(dir.clone().multiplyScalar(Math.abs(mag)))
+      ];
+    }
+  
+    _avg(list) {
+      // average of THREE.Vector3 positions for a set of elements
+      const v = new THREE.Vector3(0, 0, 0);
+      if (!Array.isArray(list) || list.length === 0) return v;
+      list.forEach(p => v.add(p.getInstanceParameter3("bbOffsets")));
+      v.multiplyScalar(1.0 / list.length);
+      return v;
+    }
+  }  
 // Forces which can be drawn as a plane
 class PlaneForce extends Force {
     equals(compareForce) {
@@ -436,7 +558,7 @@ class RepulsiveSphere extends Force {
   }
 class ForceHandler {
     types = [];
-    knownTrapForces = ['mutual_trap', 'skew_trap']; //these are the forces I know how to draw via lines
+    knownTrapForces = ['mutual_trap', 'skew_trap', 'com']; //these are the forces I know how to draw via lines
     knownPlaneForces = ["repulsion_plane", "attraction_plane"]; //these are the forces I know how to draw via planes
     // inside class ForceHandler
     knownSphereForces = ['sphere'];         // NEW

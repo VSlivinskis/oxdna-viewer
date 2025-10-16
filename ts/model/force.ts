@@ -235,6 +235,121 @@ class SkewTrap extends PairwiseForce {
     }
 }
 
+class COMForce extends Force {
+    type = 'com';
+
+    // groups (elements participating in each COM)
+    com_list: BasicElement[] = [];
+    ref_list: BasicElement[] = [];
+
+    // parameters
+    stiff: number = 0.09;
+    r0: number = 1.2;
+    rate: number = 0.0;
+
+    // for drawing like other traps (two line segments)
+    //  - eqDists: from COM toward REF with length r0
+    //  - force:   from COM in direction of REF, scaled by |(d - (r0+rate*step)) * stiff / |com_list||
+    eqDists: THREE.Vector3[] = [];
+    force: THREE.Vector3[] = [];
+
+    set(comList: BasicElement[], refList: BasicElement[], stiff = 0.09, r0 = 1.2, rate = 0.0) {
+        this.com_list = comList;
+        this.ref_list = refList;
+        this.stiff = stiff;
+        this.r0 = r0;
+        this.rate = rate;
+        this.update();
+    }
+
+    setFromParsedJson(parsedjson: any) {
+        for (const param in parsedjson) {
+            if (param === 'com_list' || param === 'ref_list') {
+                const arr = parsedjson[param];
+                if (!Array.isArray(arr)) {
+                    const err = `Invalid ${param}: expected an array of element IDs`;
+                    notify(err, "alert");
+                    throw err;
+                }
+                // map IDs → elements; drop undefineds but error if ends empty
+                (this as any)[param] = arr
+                    .map((id: number) => elements.get(id))
+                    .filter((p: BasicElement | undefined) => p !== undefined);
+
+                if ((this as any)[param].length === 0) {
+                    const err = `${param} is empty or contains invalid IDs`;
+                    notify(err, "alert");
+                    throw err;
+                }
+            } else {
+                (this as any)[param] = parsedjson[param];
+            }
+        }
+        this.update();
+    }
+
+    private avg(list: BasicElement[]): THREE.Vector3 {
+        const v = new THREE.Vector3(0, 0, 0);
+        if (!Array.isArray(list) || list.length === 0) return v;
+        list.forEach(p => v.add(p.getInstanceParameter3("bbOffsets")));
+        v.multiplyScalar(1.0 / list.length);
+        return v;
+    }
+
+    update() {
+        // compute COMs from current element positions
+        const com = this.avg(this.com_list);
+        const ref = this.avg(this.ref_list);
+
+        // direction COM -> REF
+        const d = ref.clone().sub(com);
+        const dist = d.length();
+        const dir = dist > 0 ? d.clone().divideScalar(dist) : new THREE.Vector3(1, 0, 0);
+
+        // viewer step index (falls back to 0 if not wired)
+        const step: number = (window as any)?.currentFrameIndex ?? 0;
+        const target = this.r0 + this.rate * step;
+
+        // set “equilibrium” segment (visual, length r0)
+        this.eqDists = [ com.clone(), com.clone().add(dir.clone().multiplyScalar(this.r0)) ];
+
+        // magnitude matches oxDNA: (|d| - (r0 + rate*step)) * stiff / |com_list|
+        const denom = Math.max(this.com_list.length, 1);
+        const mag = (dist - target) * this.stiff / denom;
+
+        // force segment (purely for drawing)
+        this.force = [ com.clone(), com.clone().add(dir.clone().multiplyScalar(Math.abs(mag))) ];
+    }
+
+    toJSON() {
+        return {
+            type: this.type,
+            com_list: this.com_list.map(p => p.id),
+            ref_list: this.ref_list.map(p => p.id),
+            stiff: this.stiff,
+            r0: this.r0,
+            rate: this.rate
+        };
+    }
+
+    toString(idMap?: Map<BasicElement, number>): string {
+        const ids = (arr: BasicElement[]) =>
+            arr.map(p => idMap ? idMap.get(p) : p.id).join(' ');
+        return `{
+    type = ${this.type}
+    com_list = ${ids(this.com_list)}
+    ref_list = ${ids(this.ref_list)}
+    stiff = ${this.stiff}
+    r0 = ${this.r0}
+    rate = ${this.rate}
+}`;
+    }
+
+    description(): string {
+        return `COM force between groups (${this.com_list.length}) → (${this.ref_list.length})`;
+    }
+}
+
 // Forces which can be drawn as a plane
 abstract class PlaneForce extends Force {
     abstract particles: BasicElement[] | number;
@@ -460,14 +575,15 @@ class RepulsiveSphere extends Force {
 
 class ForceHandler{
     types: string[] = [];
-    knownTrapForces: string[] = ['mutual_trap', 'skew_trap']; //these are the forces I know how to draw via lines
+    knownTrapForces: string[] = ['mutual_trap', 'skew_trap', 'com']; //these are the forces I know how to draw via lines
     knownPlaneForces: string[] = ["repulsion_plane", "attraction_plane"]; //these are the forces I know how to draw via planes
     knownSphereForces: string[] = ['sphere']; // NEW: sphere forces drawn as meshes
 
-    forceColors: THREE.Color[] = [ //add more if you implement more forces
+    forceColors: THREE.Color[] = [
         new THREE.Color(0x0000FF),
         new THREE.Color(0xFF0000),
-    ];
+        new THREE.Color(0x00AAAA), // for 'com'
+      ];
     planeColors: THREE.Color[] = [ //add more if you implement more forces
         new THREE.Color(0x00FF00),
         new THREE.Color(0xFF00FF),
