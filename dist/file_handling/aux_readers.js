@@ -168,6 +168,12 @@ function readForce(forceFile) {
                     skewTrap.update();
                     forceObjs.push(skewTrap);
                     break;
+                case "com":
+                    let COM = new COMForce();
+                    COM.setFromParsedJson(f);
+                    COM.update();
+                    forceObjs.push(COM);
+                    break;
                 case "repulsion_plane":
                     let repPlane = new RepulsionPlane();
                     repPlane.setFromParsedJson(f);
