@@ -236,7 +236,7 @@ class SkewTrap extends PairwiseForce {
 }
 
 class COMForce extends Force {
-    type = 'com';
+    type = "com";
 
     // groups (elements participating in each COM)
     com_list: BasicElement[] = [];
@@ -668,7 +668,7 @@ class ForceHandler{
 
     drawTraps() {
         // find out how many different types there are
-        const traps = this.getTraps()
+        const traps = this.getTraps().filter(f => f.type !== 'com');
         this.types = Array.from((new Set(traps.map(trap=>trap.type))));
         let v1 = [];
         let v2 = [];

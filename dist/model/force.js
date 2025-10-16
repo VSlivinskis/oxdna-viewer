@@ -192,7 +192,7 @@ class SkewTrap extends PairwiseForce {
     }
 }
 class COMForce extends Force {
-    type = 'com';
+    type = "com";
     // arrays of BasicElement (nucleotides) for each group
     com_list = [];
     ref_list = [];
@@ -644,7 +644,8 @@ class ForceHandler {
     }
     drawTraps() {
         // find out how many different types there are
-        const traps = this.getTraps();
+        const traps = this.getTraps()
+
         this.types = Array.from((new Set(traps.map(trap => trap.type))));
         let v1 = [];
         let v2 = [];
@@ -662,7 +663,12 @@ class ForceHandler {
             v2.push(f.eqDists[1].x, f.eqDists[1].y, f.eqDists[1].z);
         });
         forceGeoms.forEach((g, i) => g.addAttribute('position', new THREE.Float32BufferAttribute(v1[i], 3)));
-        let materials = this.types.map((t, i) => new THREE.LineBasicMaterial({ color: this.forceColors[i] }));
+        // let materials = this.types.map((t, i) => new THREE.LineBasicMaterial({ color: this.forceColors[i] }));
+        let materials = this.types.map((t, i) => {
+            const opts = { color: this.forceColors[i] };
+            if (t === 'com') opts.linewidth = 5;   // make CoM force line thicker
+            return new THREE.LineBasicMaterial(opts);
+        });
         this.forceLines = forceGeoms.map((g, i) => new THREE.LineSegments(g, materials[i]));
         this.forceLines.forEach(fl => {
             scene.add(fl);
@@ -677,7 +683,70 @@ class ForceHandler {
         //possibly a better way to fire update
         //trajReader.nextConfig = api.observable.wrap(trajReader.nextConfig, this.update);
         //trajReader.previousConfig = api.observable.wrap(trajReader.previousConfig, this.update);
+        this.drawCOM();
     }
+    drawCOM() {
+        const comForces = this.forces.filter(f => f.type === 'com');
+        if (comForces.length === 0) return;
+      
+        comForces.forEach(f => {
+          f.update();
+      
+          // 1) Get true endpoints: COM(ref_list) -> COM(com_list)
+          const ref = f._avg(f.ref_list);
+          const com = f._avg(f.com_list);
+      
+          const p0  = ref;                 // start at REF COM
+          const p1  = com;                 // end at COM of target list
+          const dir = p1.clone().sub(p0);
+          const len = Math.max(dir.length(), 1e-6);
+          const mid = p0.clone().add(p1).multiplyScalar(0.5);
+      
+          // 2) Create once, as UNIT height; we’ll scale Y to 'len'
+          if (!f._comMesh) {
+            const geom = new THREE.CylinderGeometry(0.12, 0.12, 1, 12);
+            const mat  = new THREE.MeshBasicMaterial({ color: 0x1a088c });
+            f._comMesh = new THREE.Mesh(geom, mat);
+            scene.add(f._comMesh);
+            this.sceneObjects.push(f._comMesh);
+          }
+      
+          // 3) Orient cylinder's +Y axis to 'dir'
+          const yAxis = new THREE.Vector3(0, 1, 0);
+          const q = new THREE.Quaternion().setFromUnitVectors(yAxis, dir.clone().normalize());
+          f._comMesh.quaternion.copy(q);
+      
+          // 4) Scale & position to span COM(ref) -> COM(com)
+          f._comMesh.scale.set(1, len, 1);
+          f._comMesh.position.copy(mid);
+        });
+      }
+      
+      redrawCOM() {
+        const comForces = this.forces.filter(f => f.type === 'com');
+        comForces.forEach(f => {
+          f.update();
+      
+          const ref = f._avg(f.ref_list);
+          const com = f._avg(f.com_list);
+      
+          const p0  = ref;
+          const p1  = com;
+          const dir = p1.clone().sub(p0);
+          const len = Math.max(dir.length(), 1e-6);
+          const mid = p0.clone().add(p1).multiplyScalar(0.5);
+      
+          if (!f._comMesh) return;
+      
+          const yAxis = new THREE.Vector3(0, 1, 0);
+          const q = new THREE.Quaternion().setFromUnitVectors(yAxis, dir.clone().normalize());
+      
+          f._comMesh.quaternion.copy(q);
+          f._comMesh.scale.set(1, len, 1);
+          f._comMesh.position.copy(mid);
+        });
+      }      
+            
     drawPlanes() {
         const planes = this.getPlanes();
         planes.forEach(f => {
@@ -721,6 +790,7 @@ class ForceHandler {
         if (this.forces.length == 0) {
             return;
         }
+
         let v1 = [];
         let v2 = [];
         for (let i = 0; i < this.types.length; i++) {
@@ -746,6 +816,7 @@ class ForceHandler {
         this.eqDistLines.geometry["attributes"]['position'].needsUpdate = true;
         render();
         this.redrawSpheres();
+        this.redrawCOM();
     }
     getSpheres() {
         return this.forces.filter(f => this.knownSphereForces.includes(f.type));
